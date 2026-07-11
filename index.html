@@ -283,6 +283,24 @@ function applyState(msg) {
     players[msg.id] = makePlayer(msg.x, msg.y, msg.n || "P?", msg.c || "#ccc");
   } else {
     p.tx = msg.x; p.ty = msg.y; p.vx = msg.vx; p.face = msg.f;
+    p.last = Date.now();
+  }
+}
+
+// WebRTC "close" can take 15-30s to fire after a tab closes — or never,
+// on abrupt drops — so removal is driven by this heartbeat timeout instead.
+const DROP_MS = 3000;
+function dropStale() {
+  const now = Date.now();
+  for (const [id, p] of Object.entries(players)) {
+    if (id === myId || now - p.last <= DROP_MS) continue;
+    if (isHost) {
+      conns[id]?.close();
+      dropPlayer(id);
+    } else {
+      delete players[id];
+      updateHud();
+    }
   }
 }
 
@@ -297,7 +315,7 @@ function sanitize(s){ return String(s).slice(0, 10).replace(/[<>&]/g, ""); }
 
 // ---------- Players ----------
 function makePlayer(x, y, name, color) {
-  return { x, y, tx: x, ty: y, vx: 0, vy: 0, name, color, onGround: false, face: 1 };
+  return { x, y, tx: x, ty: y, vx: 0, vy: 0, name, color, onGround: false, face: 1, last: Date.now() };
 }
 
 function spawnPlayer(id, name, slot) {
@@ -354,6 +372,7 @@ function startGame() {
   updateHud();
   requestAnimationFrame(loop);
   setInterval(sendState, TICK_MS);
+  setInterval(dropStale, 1000);
 }
 
 function loop() {

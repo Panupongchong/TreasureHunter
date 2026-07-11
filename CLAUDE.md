@@ -23,7 +23,9 @@ not production infrastructure.
   physics) and broadcasts position/velocity/facing at 20 Hz (`TICK_MS = 50`).
   The host relays every player's state to everyone else. Remote players are
   smoothed with simple lerp (factor 0.35). No authoritative server, no
-  anti-cheat — fine for friends.
+  anti-cheat — fine for friends. Disconnect detection is heartbeat-based:
+  a remote player is removed after 3s without a state update (`DROP_MS`),
+  because WebRTC `close` events are too slow/unreliable to rely on.
 - **Deployment: GitHub Pages.** Static hosting is sufficient; it also provides
   the HTTPS that WebRTC requires. The PeerJS public server + Google's default
   STUN handle NAT traversal. No TURN server configured yet.
