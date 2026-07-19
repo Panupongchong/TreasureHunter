@@ -18,11 +18,12 @@
 
 import { spawn } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TMP = path.join(HERE, 'tmp-wp5');
+const TMP = path.join(os.tmpdir(), 'vb-tmp-wp5'); // OUTSIDE the vite-watched tree
 const APP = 'http://localhost:5173/';
 const CHROME_CANDIDATES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -635,7 +636,11 @@ async function main() {
             if(fire){
               window.__hold.aimX=r.x + r.body.velocity.x*0.06; window.__hold.aimY=r.y + r.body.velocity.y*0.06;
               window.__hold.grappleHeld=true; window.__edges.push({grapple:true}); } }
-          if(r.state.rs==='held'){ clearInterval(iv); window.__hold.grappleHeld=false; }
+          // QA-WP7: stop ONLY when the CATCHER (slot 0) has it. The old guard
+          // ('rs==="held"' for anyone) self-cleared on the first tick because
+          // the THROWER (slot 1) holds the relic at install time -> permanent
+          // dead catcher whenever the tick beat the throw. Harness race only.
+          if(r.state.rs==='held' && r.state.holderSlot===0){ clearInterval(iv); window.__hold.grappleHeld=false; }
         }catch(e){clearInterval(iv); window.__catchErr=String(e);} }, 40);
         window.__catchIv=iv;
         window.__catchTo=setTimeout(()=>clearInterval(iv), 8000); return 'ok';})()`);
@@ -729,10 +734,28 @@ async function main() {
     const rMoved = r0.x - minRx;            // relic slid left (toward player)
     const gapEnd = Math.abs(last.rx - last.px);
     const midpoint = (p0.x + r0.x) / 2;
-    const ok = pMoved > 25 && rMoved > gap0 * 0.4 && gapEnd < 60 && !!contact;
+    // QA-WP7: judging the LAST sample's gap sampled a random phase of the
+    // documented post-contact oscillation (2px on one run, 61px on the next
+    // against a 60px bar) — the sampler's real cadence is load-dependent
+    // (40ms nominal, ~78ms under a 3-peer host), so the cutoff lands
+    // anywhere in the swing. Measured (qa-fish-diag.mjs, 4 trials, solo):
+    // the post-contact gap is a DAMPED oscillation converging to ~4px —
+    // amplitude 160 -> 82 -> 47 -> 29 -> 12 -> 4, reproducible to +/-2px.
+    // So assert convergence (second-half amplitude well under first-half),
+    // which is phase-independent and is what "they met and settled" means.
+    const ci = samples.indexOf(contact);
+    const post = ci >= 0 ? samples.slice(ci) : [];
+    const amp = (arr) => (arr.length ? Math.max(...arr.map((s) => Math.abs(s.rx - s.px))) : NaN);
+    const half = Math.floor(post.length / 2);
+    const ampEarly = amp(post.slice(0, half));
+    const ampLate = amp(post.slice(half));
+    const converged = post.length >= 6 && ampLate < ampEarly * 0.6;
+    const ok = pMoved > 25 && rMoved > gap0 * 0.4 && converged && !!contact;
     report('grapple-fish', ok,
       `gap ${gap0.toFixed(0)}px: BOTH slid — player +${pMoved.toFixed(0)}px toward relic, relic ${rMoved.toFixed(0)}px toward player; ` +
-      `first contact at x=${contact ? contact.px.toFixed(0) : '?'}, settled gap ${gapEnd.toFixed(0)}px at x=${last.px.toFixed(0)} ` +
+      `first contact at x=${contact ? contact.px.toFixed(0) : '?'}, then a DAMPED settle: post-contact gap amplitude ` +
+      `${isFinite(ampEarly) ? ampEarly.toFixed(0) : '?'}px -> ${isFinite(ampLate) ? ampLate.toFixed(0) : '?'}px ` +
+      `(${post.length} samples, gap at cutoff ${gapEnd.toFixed(0)}px) at x=${last.px.toFixed(0)} ` +
       `(geometric middle ${midpoint.toFixed(0)}; meet biased toward the player's start — relic ground drag 600 vs player friction 1800, ` +
       `the design-documented "grounded target resists through friction" rule in GrappleSystem's header)`);
     await H.eval(resetNoise);

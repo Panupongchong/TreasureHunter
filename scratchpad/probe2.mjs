@@ -1,0 +1,28 @@
+import { spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const CHROME='C:/Program Files/Google/Chrome/Application/chrome.exe';
+const dir=path.join(os.tmpdir(),'vb-probe2'); mkdirSync(dir,{recursive:true});
+const p=spawn(CHROME,['--headless=new','--remote-debugging-port=9461',`--user-data-dir=${dir}`,'--no-first-run','--disable-gpu','about:blank'],{stdio:'ignore'});
+const sleep=(m)=>new Promise(r=>setTimeout(r,m));
+let info; for(let i=0;i<40;i++){try{info=await(await fetch('http://127.0.0.1:9461/json/version')).json();break}catch{await sleep(250)}}
+const ws=new WebSocket(info.webSocketDebuggerUrl); await new Promise(r=>ws.onopen=r);
+let id=0; const pend=new Map(); const errs=[];
+ws.onmessage=(m)=>{const x=JSON.parse(m.data); if(x.id&&pend.has(x.id)){pend.get(x.id)(x.result||x.error);pend.delete(x.id)} if(x.method==='Runtime.exceptionThrown')errs.push(JSON.stringify(x.params.exceptionDetails.exception?.description||x.params.exceptionDetails.text).slice(0,700));};
+const send=(method,params={},sid)=>{const i=++id;ws.send(JSON.stringify({id:i,method,params,...(sid?{sessionId:sid}:{})}));return new Promise(r=>pend.set(i,r))};
+const {targetInfos}=await send('Target.getTargets');
+const pg=targetInfos.find(t=>t.type==='page');
+const {sessionId}=await send('Target.attachToTarget',{targetId:pg.targetId,flatten:true});
+await send('Runtime.enable',{},sessionId); await send('Page.enable',{},sessionId);
+const ev=(e)=>send('Runtime.evaluate',{expression:e,returnByValue:true,awaitPromise:true},sessionId).then(r=>r.exceptionDetails?('EXC: '+(r.exceptionDetails.exception?.description||'').slice(0,400)):r.result?.value);
+await send('Page.navigate',{url:'http://localhost:5174/'},sessionId);
+await sleep(5000);
+await ev(`game.scene.getScene('Menu')._solo()`);
+await sleep(2500);
+console.log('lobby:', await ev(`JSON.stringify({map:game.scene.getScene('Game').mapId,players:game.scene.getScene('Game').players.size,phase:game.scene.getScene('Game').session.phase})`));
+console.log('setPhase:', await ev(`(()=>{const sc=game.scene.getScene('Game');try{sc._setPhase('playing',{stageId:'test',clockMs:720000});return 'ok'}catch(e){return 'ERR '+e.message+e.stack}})()`));
+await sleep(3000);
+console.log('after:', await ev(`JSON.stringify({map:game.scene.getScene('Game').mapId,phase:game.scene.getScene('Game').session.phase,fx:!!game.scene.getScene('Game').fx})`));
+console.log('ERRS:\n'+errs.slice(0,4).join('\n---\n'));
+p.kill(); process.exit(0);

@@ -4,19 +4,24 @@
 // No physics body EVER (PickupEntity precedent) — reclaim is a host
 // distance check; position is static and event-driven (TOMBSTONE /
 // TOMBSTONE_STATE / DESPAWN), never in snapshots.
+//
+// WP7: three rects → one per-slot procedural slab (the slot-color
+// engraving is BAKED into tombstone0..3, so `t.cap` is gone) + the
+// bagged-relic gem. `t.state.x / t.state.y` remain the LOGICAL ground
+// position that HUD and RelicSystem.tombstoneSpawn read — deliberately
+// distinct from the sprite's drawn position. Do not conflate them.
 // ============================================================
 
-import { PLAYER } from '../config.js';
+import { FX } from '../config.js';
 
 /**
- * @param {Phaser.Scene} scene
  * @param {{id:string, slot:number, x:number, y:number, baggedRelic?:boolean}} def
  */
 export function createTombstone(scene, { id, slot, x, y, baggedRelic }) {
-  const t = scene.add.rectangle(x, y - 13, 20, 26, 0x565d75);              // slab
-  t.cap = scene.add.rectangle(x, y - 28, 12, 6, PLAYER.colors[slot % 4]);  // whose grave
-  t.gem = scene.add.rectangle(x, y - 40, 10, 10, 0xf5a623).setAngle(45)
-    .setVisible(!!baggedRelic);                                            // bagged-relic glyph
+  const t = scene.add.image(x, y - 15, `tombstone${slot % 4}`)
+    .setDepth(FX.depth.furniture);
+  t.gem = scene.add.image(x, y - 40, 'tombstoneGem')
+    .setDepth(FX.depth.furniture + 1).setVisible(!!baggedRelic);
   t.state = { id, slot, x, y, baggedRelic: !!baggedRelic };
   return t;
 }
@@ -27,7 +32,6 @@ export function setTombstoneBagged(t, bagged) {
 }
 
 export function destroyTombstone(t) {
-  t.cap.destroy();
   t.gem.destroy();
   t.destroy();
 }

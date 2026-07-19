@@ -187,11 +187,20 @@ export const UI = {
     bg: 0x10121a, panel: 0x1a1e2c, panelStroke: 0x2a3048,
     text: '#e8eaf2', muted: '#8890a6', dim: '#565d75',
     gold: '#ffd23f', danger: '#ff5d5d', warn: '#ffb347',
-    ok: '#7ee787', noise: '#b07eff',
+    ok: '#7ee787',
+    // WP7 palette reconciliation (art-spec §1.3 rules 3 + 5 outrank
+    // ux-spec §0.3 in the WP7 authority order). `noise` was violet, which
+    // (a) collided with art-spec's violet STUN reservation and (b) made
+    // the HUD gauge a different color from the world noise ripple that
+    // feeds it — art-spec §3.5's whole point is that the economy reads as
+    // ONE color end to end. Two constants moved, nothing relaid out.
+    // `stun` is new and takes over the ritual/stun UI the old violet
+    // `noise` was standing in for.
+    noise: '#ff8c2e', stun: '#b39cff',
     // int twins (Graphics fills/strokes)
     goldInt: 0xffd23f, dangerInt: 0xff5d5d, warnInt: 0xffb347,
-    okInt: 0x7ee787, noiseInt: 0xb07eff, textInt: 0xe8eaf2,
-    dimInt: 0x565d75, mutedInt: 0x8890a6,
+    okInt: 0x7ee787, noiseInt: 0xff8c2e, stunInt: 0xb39cff,
+    textInt: 0xe8eaf2, dimInt: 0x565d75, mutedInt: 0x8890a6,
   },
   scrimAlpha: 0.7,
   panelAlpha: 0.92, panelRadius: 6, panelStrokeW: 2,
@@ -423,6 +432,96 @@ export const NET = {
   heartbeatTimeoutMs: 8000,   // silence beyond this = peer considered gone
   helloTimeoutMs: 8000,       // host drops a connection that never says hello
   maxNameLen: 16,
+};
+
+// ---------- WP7 art palette (art-spec §1.1) — WORLD colors ----------
+// UI.colors above is UNCHANGED and stays the shipped WP6 chrome
+// (ux-spec §0.3). The two palettes disagree on `noise` and `gold`
+// deliberately: the world relic is deeper amber (#ffb52e) so it can never
+// read as player 0 (#ffd23f), while the HUD's gold accents keep matching
+// player 0's roster row. They never appear in the same layer.
+export const COLORS = {
+  bgDeep: 0x0b0d14, bgFar: 0x131624, bgFarDetail: 0x0f1120,
+  bgMid: 0x1d2236, bgMidDetail: 0x262c48,
+  surface: 0x39406a, surfaceTop: 0x4c548a, surfaceShade: 0x2b3152,
+  surfaceSeam: 0x323858, outline: 0x12141c,
+  gold: 0xffb52e, goldLight: 0xffdf7e, goldDark: 0xd98a12, goldFacet: 0xa86a0c,
+  danger: 0xff5d6c, dangerDeep: 0xc23a4c, dangerDark: 0x7d2733, monster: 0xf2566b,
+  noise: 0xff8c2e, quiet: 0x6fe3a0, stun: 0xb39cff,
+  steel: 0xc8cde8, steelDark: 0x9aa2c8, steelDeep: 0x6b7394,
+  wood: 0x7a552f, woodDark: 0x5c3f22, metalBand: 0x3a4056,
+  rubbleA: 0x565d75, rubbleB: 0x4a4f70, rubbleC: 0x3a3f5c,
+  ink: 0xe8eaf2, inkDim: 0x8890a6, inkFaint: 0x565d75, white: 0xffffff,
+  eyeWhite: 0xf4f6ff, stunTint: 0x9aa0b8,
+};
+
+// ---------- WP7 FX tuning (art-spec §3) ----------
+// Rendering/juice only — nothing here is read by any system in sim/.
+export const FX = {
+  particleCap: 250,
+  slotDarkMult: 0.55,
+  outlineW: 2, bruteOutlineW: 3, cornerR: 4,
+  tile: { size: 128, cell: 32 },      // wall/floor tile atlas + brick cell
+  dim: { color: 0x05070d, alpha: 0.45, ms: 2000, depth: 90 },
+  vignette: {
+    collapse: 0x2a0b10, alpha: 0.35, depth: 91,
+    danger: 0xff5d6c, dangerAlpha: 0.10, dangerDepth: 95,
+  },
+  glow: {
+    playerR: 44, playerAlpha: 0.10, relicR: 26, relicAlpha: 0.18,
+    relicEscMult: 1.5, relicEscAlpha: 0.26,
+  },
+  // art-spec §4.1 normative depth table.
+  depth: {
+    bgFar: 0, bgMid: 5, terrain: 10, decal: 11, barrier: 12, furniture: 14,
+    relic: 18, brute: 20, skulker: 21, remote: 30, local: 31,
+    beam: 40, particle: 50, overhead: 60, ping: 70,
+    // Screen-space overlays (scrollFactor 0) — art-spec §4.1 rows 90+.
+    // dim + vignettes stay BELOW WorldHUD (UI.depth.world = 900) on
+    // purpose: escalation must not bury interact prompts, which is the
+    // one read the dim already makes harder. The full-screen transition
+    // effects (danger tint, win wipe, white flash) DO cover it — a black
+    // wipe with a fully-lit crosshair and prompt text floating on it read
+    // as a rendering bug. That band is not in the art-spec table because
+    // it predates WP6 introducing the 900 world-UI band.
+    dim: 90, collapseVig: 91, urgencyVig: 95,
+    tint: 916, wipe: 919,
+  },
+
+  // ---- camera (art-spec §4.2.9) ----
+  cam: {
+    lerp: 0.12,          // matches the WP5 shipped value
+    deadzoneW: 120, deadzoneH: 80,
+    lookahead: 40,       // px in the facing direction
+    lookLerp: 0.05,      // per-frame lerp toward the lookahead target
+  },
+
+  // ---- screen shake tiers (art-spec §3.6). Shakes NEVER stack: a
+  // request only restarts the camera shake if its rank >= the running
+  // one, or the running one has expired (Fx._shakeReq is the sole owner).
+  shake: {
+    small: { ms: 80, i: 0.002 },
+    medium: { ms: 150, i: 0.004 },
+    large: { ms: 250, i: 0.008 },
+    calamity: { ms: 600, i: 0.010 },
+  },
+
+  // ---- particle budget (art-spec §3: 250 live, LOCKED) ----
+  // tier = fraction of particleCap above which that tier stops emitting.
+  // T2 ambient dies first, T0 impact/readability last.
+  tier: { T2: 0.60, T1: 0.85, T0: 1.0 },
+  caps: {
+    debrisDoor: 12, debrisRubble: 16, sparks: 8, landDust: 8,
+    sprintDust: 2, zipStreaks: 3, loseDebris: 20, confetti: 40,
+    ghostsPerPlayer: 5, ghostPool: 24, rings: 8,
+  },
+  rates: {           // ms between repeat emits of the same rate-gated effect
+    sprintMs: 100, landMs: 150, zipMs: 50, shimmerMs: 30,
+    footfallMs: 500, doorDebrisMs: 200, pebbleMs: 800,
+  },
+  zipSpeedMin: 400,  // px/s derived speed that turns a grapple into a "zip"
+  cullPad: 120,      // camera.worldView inflation before an emit is culled
+  landSoftMin: 300, landHardMin: 700, // |vy| landing tiers (art-spec §3.8)
 };
 
 // Map geometry now lives in src/maps/ (lobbyMap.js, testMap.js).

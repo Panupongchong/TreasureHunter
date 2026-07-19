@@ -55,7 +55,10 @@ registerEventHandler(EV.PING_MARKER, (scene, ev) => scene.spawnPingMarker?.(ev))
 // on all peers this handler is the 300 ms ok-flash hook (best-effort
 // cosmetic — the phase message follows within the same tick).
 // `readyCompleteFlash` is the UI half's (Engineer #2).
-registerEventHandler(EV.READY_COMPLETE, (scene) => scene.readyCompleteFlash?.());
+registerEventHandler(EV.READY_COMPLETE, (scene) => {
+  scene.readyCompleteFlash?.();
+  scene.fx?.onReadyComplete(); // WP7 §2.9: white screen flash
+});
 
 // STAGE_CYCLE is sim-internal (filtered from broadcast AND from local
 // apply by the GameScene drain — roster is the wire truth for stageId).
@@ -79,10 +82,12 @@ registerEventHandler(EV.SYNC_DONE, (scene) => {
 registerEventHandler(EV.SPAWN, (scene, ev) => {
   if (ev.etype !== 'monster') return; // other etypes: WP5/WP6 (tombstone…)
   scene.worldUI?.onMonsterSpawn(ev); // WP6 §7.2: one-shot '!' world marker
+  scene.fx?.onMonsterSpawn(ev);      // WP7 §3.9 ring burst + telegraph
   if (scene.monsters.has(ev.id)) return;
   scene.monsters.set(ev.id, createMonster(scene, ev.id, ev.mtype, ev.x, ev.y, false));
 });
 registerEventHandler(EV.DESPAWN, (scene, ev) => {
+  scene.fx?.onDespawn(ev); // WP7: pickup pop (reads the GO before teardown)
   if (ev.etype === 'hourglass') {
     const pk = scene.pickups?.get(ev.id);
     if (pk) setPickupTaken(pk);
@@ -117,6 +122,7 @@ registerEventHandler(EV.RELIC_STATE, (scene, ev) => {
   if (!scene.sim && (ev.rs === RS.loose || ev.rs === RS.flying)) {
     rel.setPosition(ev.x, ev.y);
   }
+  scene.fx?.onRelicState(ev); // WP7: transition pips — AFTER the state write
 });
 
 registerEventHandler(EV.TOMBSTONE, (scene, ev) => {
@@ -128,11 +134,13 @@ registerEventHandler(EV.TOMBSTONE, (scene, ev) => {
     scene.tombstones.set(id, createTombstone(scene, { id, ...ev }));
   }
   scene._removePlayer(ev.slot); // host: already removed → no-op
+  scene.fx?.onTombstone(ev);
 });
 
 registerEventHandler(EV.TOMBSTONE_STATE, (scene, ev) => {
   const ts = scene.tombstones?.get('t' + ev.slot);
   if (ts) setTombstoneBagged(ts, ev.baggedRelic);
+  scene.fx?.onTombstoneState(ev);
 });
 
 registerEventHandler(EV.REJOINED, (scene, ev) => {
@@ -148,6 +156,9 @@ registerEventHandler(EV.REJOINED, (scene, ev) => {
   const stone = scene.tombstones?.get('t' + ev.slot);
   scene._addPlayer(ev.slot, stone ? [stone.x, stone.y] : null);
   if (stone) scene.spawnRejoinFlash?.(stone.x, stone.y, ev.slot);
+  // WP7: ring burst + (for the local slot) re-point the camera at the
+  // freshly re-added view — the old one was destroyed by TOMBSTONE.
+  scene.fx?.onRejoined(ev);
   // toast ("<NAME> IS BACK") rides the ui:event relay — UIScene catalog.
 });
 
@@ -155,11 +166,17 @@ registerEventHandler(EV.REJOINED, (scene, ev) => {
 // Beam rendering is snapshot-driven (the `grapples` group); these exist
 // for WP7 FX hooks and to keep clients warning-free. NOISE_BURST fills
 // the gauge host-side once WP4's NoiseSystem lands.
-registerEventHandler(EV.GRAPPLE_ATTACH, () => {}); // WP7: impact sparks
-registerEventHandler(EV.GRAPPLE_DETACH, () => {}); // WP7: beam snap FX
-// WP6 §10: world ripple + loud-event shake (WorldHUD). The gauge spike
-// tick + relic-drop toast ride the ui:event relay (UIScene).
-registerEventHandler(EV.NOISE_BURST, (scene, ev) => scene.worldUI?.onNoiseBurst(ev));
+registerEventHandler(EV.GRAPPLE_ATTACH, (scene, ev) => scene.fx?.onGrappleAttach(ev));
+registerEventHandler(EV.GRAPPLE_DETACH, (scene, ev) => scene.fx?.onGrappleDetach(ev));
+// WP6 §10 shipped the world ripple + loud-event shake in WorldHUD. WP7
+// supersedes BOTH with the art-spec §3.5 amount-scaled triple ring and
+// the single shake arbiter. Either/or, never both — two ripples on one
+// event is a defect, and two shake owners defeat the never-stack rule.
+// WorldHUD's version stays as the fallback for an Fx-less scene.
+registerEventHandler(EV.NOISE_BURST, (scene, ev) => {
+  if (scene.fx) scene.fx.onNoiseBurst(ev);
+  else scene.worldUI?.onNoiseBurst(ev);
+});
 
 // ---------------- WP4 world systems ----------------
 // One presentation path, all modes: the host applies its own sim's events
@@ -170,38 +187,49 @@ registerEventHandler(EV.DOOR_STATE, (scene, ev) => {
   if (!d) return;
   if (ev.state === 'broken') setDoorBroken(d); // idempotent (host already sim-broke it)
   else setDoorDamaged(d, ev.smashHp);
+  scene.fx?.onDoorState(ev); // WP7: debris/dust/shake, half-count on a hit
 });
 
 // WP6: the ux-spec §9 toast copy + §7.1 clock delta floats for
 // TIME_COST/TIME_GAIN, and the §7.9 escalation banner, all live in the
 // UIScene catalog fed by the 'ui:event' relay — world-side handlers are
 // no-ops (WP7 adds tint/collapse FX on ESCALATION).
-registerEventHandler(EV.TIME_COST, () => {});
-registerEventHandler(EV.TIME_GAIN, () => {});
-registerEventHandler(EV.ESCALATION, () => {});
+registerEventHandler(EV.TIME_COST, (scene) => scene.fx?.onTimeDelta(-1));
+registerEventHandler(EV.TIME_GAIN, (scene) => scene.fx?.onTimeDelta(1));
+registerEventHandler(EV.ESCALATION, (scene, ev) => scene.fx?.onEscalation(ev.level));
 
 registerEventHandler(EV.PICKUP_STATE, (scene, ev) => {
   const pk = scene.pickups?.get(ev.id);
   if (pk) setRitualUsed(pk);
+  scene.fx?.onPickupUsed(ev);
 });
 
 // Host/solo GameScene maps RUN_OVER to PHASE.RESULTS after the event
 // drain (the authoritative transition rides the phase message); clients
 // just follow that phase. WP7 adds calamity FX here.
-registerEventHandler(EV.RUN_OVER, () => {});
+registerEventHandler(EV.RUN_OVER, (scene, ev) => scene.fx?.onRunOver(ev));
 
-registerEventHandler(EV.HARD_LANDING, () => {}); // WP7: dust + thud
+registerEventHandler(EV.HARD_LANDING, (scene, ev) => scene.fx?.onHardLanding(ev));
 
 // ---------------- WP4 combat half feel events ----------------
 // Presentation-only hooks: the WP4 readability cues (windup flash, stun
 // wobble, dying fade) are driven from `.state.ai`/`attackPhase` in the
 // entity cosmetics, NOT from these events — they exist for WP7 juice
 // (sparks, shake, swing arcs) and to keep clients warning-free.
-registerEventHandler(EV.SWING, () => {});             // WP7: swing arc FX
-registerEventHandler(EV.HIT, () => {});               // WP7: impact sparks / shake
-registerEventHandler(EV.STAGGERED, (scene, ev) =>     // WP6: channel-interrupt
-  scene.worldUI?.onStagger(ev));                      // heuristic (§7.6); WP7: puff
-registerEventHandler(EV.MONSTER_TELEGRAPH, () => {}); // WP7: real telegraph FX
-registerEventHandler(EV.MONSTER_ATTACK, () => {});    // WP7: swipe FX
-registerEventHandler(EV.MONSTER_FLINCH, () => {});    // WP7: flinch blink
-registerEventHandler(EV.MONSTER_DIED, () => {});      // WP7: pop + particles
+// STUN/REVIVE had NO handler before WP7 (applyEvent logged "no handler"
+// once per kind on every peer). The stun POSE — rotation, X-eyes, stars,
+// gray tint — stays state-driven so it survives a snapshot-only client
+// and a rejoin replay; these hooks own only the one-shot impact.
+registerEventHandler(EV.STUN, (scene, ev) => scene.fx?.onStun(ev));
+registerEventHandler(EV.REVIVE, (scene, ev) => scene.fx?.onRevive(ev));
+
+registerEventHandler(EV.SWING, (scene, ev) => scene.fx?.onSwing(ev));
+registerEventHandler(EV.HIT, (scene, ev) => scene.fx?.onHit(ev));
+registerEventHandler(EV.STAGGERED, (scene, ev) => {
+  scene.worldUI?.onStagger(ev);  // WP6: channel-interrupt heuristic (§7.6)
+  scene.fx?.onStaggered(ev);     // WP7: feet puff + art-node jitter
+});
+registerEventHandler(EV.MONSTER_TELEGRAPH, (scene, ev) => scene.fx?.onMonsterTelegraph(ev));
+registerEventHandler(EV.MONSTER_ATTACK, (scene, ev) => scene.fx?.onMonsterAttack(ev));
+registerEventHandler(EV.MONSTER_FLINCH, (scene, ev) => scene.fx?.onMonsterFlinch(ev));
+registerEventHandler(EV.MONSTER_DIED, (scene, ev) => scene.fx?.onMonsterDied(ev));

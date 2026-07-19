@@ -16,10 +16,11 @@
 // ============================================================
 
 import {
-  GAME_WIDTH, GAME_HEIGHT, UI, CLOCK, GRAPPLE, PLAYER,
+  GAME_WIDTH, GAME_HEIGHT, UI, CLOCK, GRAPPLE, PLAYER, COLORS,
 } from '../config.js';
 import { InputManager } from '../input/InputManager.js';
 import { PHASE } from '../net/Session.js';
+import { slotColorStr } from '../fx/textures.js';
 
 // ---------------- shared helpers ----------------
 
@@ -49,10 +50,13 @@ export function fmtMsShort(ms) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
-/** '#rrggbb' for a slot's player color. */
-export function slotColorStr(slot) {
-  return '#' + PLAYER.colors[slot % 4].toString(16).padStart(6, '0');
-}
+// '#rrggbb' for a slot's player color. WP7 §6: the derivation helpers now
+// live in ONE module (fx/textures.js — every world consumer already
+// imports it). Re-exported here so UIScene/LobbyUI/ResultsUI keep
+// importing `slotColorStr` from HUD: one implementation, zero import
+// churn, zero risk to the green WP6 suite.
+export { slotColor, slotDark, darken } from '../fx/textures.js';
+export { slotColorStr };
 
 // ---------------- strings (ux-spec §11) ----------------
 
@@ -317,6 +321,14 @@ export class HUD {
     const blink = warn && Math.floor(now / 250) % 2 === 1;
     g.fillStyle(flashing ? 0xffffff : C.noiseInt, blink ? 0.7 : 1);
     if (fillW > 0) g.fillRect(NG.x + 2, NG.y + 2, fillW, NG.h - 4);
+    // WP7 (art-spec §5): quarter ticks. They turn the gauge from "a bar
+    // that grows" into a readable scale — "two more hammer hits" instead
+    // of "it looks fairly full". Drawn OVER the fill so they stay legible
+    // at any level. Position/size/behaviour of the gauge are unchanged.
+    g.fillStyle(C.panelStroke, 1);
+    for (let q = 1; q <= 3; q++) {
+      g.fillRect(NG.x + 2 + Math.round((NG.w - 4) * q / 4), NG.y + 2, 1, NG.h - 4);
+    }
   }
 
   _updateRelic(gs) {
@@ -389,11 +401,12 @@ export class HUD {
     const SB = UI.stunBar;
     const g = this.stunBarGfx;
     g.clear();
-    g.fillStyle(UI.colors.panel, 1);
-    g.fillRect(480 - SB.w / 2, SB.y, SB.w, SB.h);
+    // WP7 restyle: ux-spec §0.4 rounded panel chrome (same rect, radius 4).
+    g.fillStyle(UI.colors.panel, UI.panelAlpha);
+    g.fillRoundedRect(480 - SB.w / 2, SB.y, SB.w, SB.h, 4);
     g.lineStyle(1, UI.colors.panelStroke, 1);
-    g.strokeRect(480 - SB.w / 2, SB.y, SB.w, SB.h);
-    g.fillStyle(UI.colors.warnInt, 1);
+    g.strokeRoundedRect(480 - SB.w / 2, SB.y, SB.w, SB.h, 4);
+    g.fillStyle(UI.colors.stunInt, 1); // violet = stun (art-spec §1.3 rule 5)
     if (frac > 0) g.fillRect(480 - SB.w / 2 + 1, SB.y + 1, (SB.w - 2) * frac, SB.h - 2);
   }
 
@@ -406,6 +419,14 @@ export class HUD {
     this.wpnHint.setText(STR.weaponHint[weapon]);
     const g = this.wpnGfx;
     g.clear();
+    // WP7 (art-spec §5): a 24×24 slot frame behind the glyph. The glyph
+    // drawings and their coordinates are unchanged — the frame just gives
+    // the bottom-left corner the same panel chrome as every other widget
+    // instead of a shape floating on the background.
+    g.fillStyle(UI.colors.panel, UI.panelAlpha);
+    g.fillRoundedRect(14, 497, 24, 24, 4);
+    g.lineStyle(1, UI.colors.panelStroke, 1);
+    g.strokeRoundedRect(14, 497, 24, 24, 4);
     g.fillStyle(UI.colors.textInt, 1);
     if (weapon === 'hammer') {
       g.fillRect(16, 500, 20, 7);   // head
@@ -757,9 +778,15 @@ export class WorldHUD {
     const holder = this.scene.players.get(st.holderSlot);
     if (!holder) return;
     const cx = holder.x, cy = holder.y - PLAYER.height / 2 - 12;
-    this.dynGfx.fillStyle(UI.colors.goldInt, 1);
+    // RELIC gold, not UI gold: UI.colors.goldInt is byte-identical to
+    // PLAYER.colors[0], so on slot 0 this marker read as "player colour"
+    // rather than "relic". It is also load-bearing now — WP7 mutes the
+    // relic entity while carried, and the bagged carrier's only other cue
+    // is a 6x8 gem on the backpack, so bagged gets a bigger diamond.
+    const r = st.rs === 'bagged' ? 6 : 4;
+    this.dynGfx.fillStyle(COLORS.gold, 1);
     this.dynGfx.fillPoints([
-      { x: cx, y: cy - 4 }, { x: cx + 4, y: cy }, { x: cx, y: cy + 4 }, { x: cx - 4, y: cy },
+      { x: cx, y: cy - r }, { x: cx + r, y: cy }, { x: cx, y: cy + r }, { x: cx - r, y: cy },
     ], true);
   }
 

@@ -26,6 +26,9 @@ window.game = new Phaser.Game({
       debug: false,
     },
   },
+  // RMB is the grapple button (CLAUDE.md bindings), so the browser context
+  // menu would pop on every single grapple. Suppress it game-wide.
+  disableContextMenu: true,
   input: {
     gamepad: true,
   },

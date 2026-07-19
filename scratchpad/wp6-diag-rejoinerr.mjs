@@ -9,11 +9,12 @@
 // theory is confirmed.
 import { spawn } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TMP = path.join(HERE, 'tmp-wp6diag');
+const TMP = path.join(os.tmpdir(), 'vb-tmp-wp6diag'); // OUTSIDE the vite-watched tree
 const APP = 'http://localhost:5173/';
 const CHROME = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',

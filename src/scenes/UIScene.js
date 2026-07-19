@@ -92,8 +92,13 @@ export class UIScene extends Phaser.Scene {
     this.hud.setPhase(phase);
     this.lobbyUI.setActive(phase === PHASE.LOBBY);
     this.toasts.setLobbyAnchor(phase === PHASE.LOBBY);
-    if (phase === PHASE.RESULTS) this.resultsUI.show(data);
-    else this.resultsUI.hide();
+    if (phase === PHASE.RESULTS) {
+      this.resultsUI.show(data);
+      // WP7 §3.11: UIScene owns WHEN (it is the only thing that knows the
+      // verdict rendered), Fx owns WHAT. No payload = the mid-results-join
+      // holding screen — we do not celebrate a verdict we were not told.
+      if (data?.result === 'win') this.gameScene?.fx?.confettiBurst();
+    } else this.resultsUI.hide();
   }
 
   // ---------------- roster diff (JOINED / LEFT, §9) ----------------

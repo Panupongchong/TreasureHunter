@@ -29,12 +29,13 @@
 
 import { spawn } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
-const TMP = path.join(HERE, 'tmp-wp6a');
+const TMP = path.join(os.tmpdir(), 'vb-tmp-wp6a'); // OUTSIDE the vite-watched tree
 const SHOTS = path.join(HERE, 'wp6-shots');
 const APP = 'http://localhost:5173/';
 const CHROME_CANDIDATES = [

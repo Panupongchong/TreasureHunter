@@ -263,12 +263,21 @@ export class LobbyUI {
     this._prevRz = rz;
 
     const R = UI.readyRing;
-    const cx = zone.x + zone.w / 2;
+    // The ring is drawn in the UIScene (static camera) but anchored to
+    // WORLD coordinates from map.readyZone. That is only correct while
+    // world == screen. WP7 makes the GameScene camera scroll on large
+    // stages, so convert explicitly — an identity transform in every
+    // lobby today (viewport-sized map ⇒ static camera), and correct by
+    // construction if a stage larger than the viewport ever gets a zone.
+    const wcx = zone.x + zone.w / 2;
     // Ring sits clear of head height: players standing in the zone were
     // occluding their own 3-2-1 countdown (UX review §6.4).
-    const cy = zone.y + zone.h - 8 - UI.readyRing.aboveStrip;
+    const wcy = zone.y + zone.h - 8 - UI.readyRing.aboveStrip;
+    const { x: cx, y: cy } = gs.toScreen ? gs.toScreen(wcx, wcy) : { x: wcx, y: wcy };
     const flashing = now < this._flashUntil;
-    const key = [rz, n, m, flashing ? this._flashColor : 0].join('|');
+    // cx/cy join the redraw key: with a scrolling camera the screen
+    // anchor moves even when the ring's DATA is unchanged.
+    const key = [rz, n, m, flashing ? this._flashColor : 0, cx | 0, cy | 0].join('|');
     if (key !== this._ringKey) {
       this._ringKey = key;
       const g = this.ringGfx;

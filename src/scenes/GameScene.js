@@ -12,7 +12,12 @@
 // multi-player port of the step-1 movement code).
 // ============================================================
 
-import { CLOCK, PLAYER, STAGES, READY, UI, GAME_WIDTH, GAME_HEIGHT } from '../config.js';
+import {
+  CLOCK, PLAYER, STAGES, READY, UI, COLORS, FX,
+} from '../config.js';
+import { ensureTextures } from '../fx/textures.js';
+import { Fx } from '../fx/Fx.js';
+import { setupCamera } from '../fx/camera.js';
 import { WorldHUD } from '../ui/HUD.js';
 import { InputManager } from '../input/InputManager.js';
 import { getMap, spawnFor } from '../maps/mapTypes.js';
@@ -59,6 +64,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // WP7: generate-once, idempotent, ~0 ms after the first call. Placed
+    // at the TOP of create() because GameScene is the only scene that
+    // draws world art AND the scene that restarts — every entry path
+    // (menu→lobby, lobby→playing, playing→lobby, client join, rejoin
+    // replay) is covered by construction, with no ordering hazard.
+    // Textures live on Phaser.Game.textures, so scene.restart() never
+    // touches them: no regeneration, no leak, no key collision.
+    ensureTextures(this);
     this.map = getMap(this.mapId);
     this.inputManager = new InputManager(this);
 
@@ -70,13 +83,41 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, worldW, worldH);
     this.cameras.main.setBounds(0, 0, worldW, worldH);
 
+    // ----- backgrounds (two GameObjects for the ENTIRE world) -----
+    // TileSprite on WebGL is one quad with a repeating sampler, so world
+    // size costs nothing beyond what is on screen. Contrast ladder
+    // L2 < L1 < L0 < entities is fixed (art-spec §1.2).
+    this.add.tileSprite(worldW / 2, worldH / 2, worldW, worldH, 'tileFar')
+      .setDepth(FX.depth.bgFar);
+    this.add.tileSprite(worldW / 2, worldH / 2, worldW, worldH, 'tileMid')
+      .setDepth(FX.depth.bgMid).setAlpha(0.85);
+
     // ----- static level -----
+    // TileSprite (not Image): its width/height ARE the logical size, so
+    // getBounds() stays exact for GrappleSystem._terrainRects (the raycast
+    // source of truth) and the static body derives exactly as the old
+    // add.rectangle did. setTilePosition aligns every platform to ONE
+    // world brick grid, so adjacent platforms line up and no two show the
+    // same crop — variation for zero per-frame cost, deterministic on
+    // host and client alike.
     this.platforms = this.physics.add.staticGroup();
-    for (const [x, y, w, h] of this.map.platforms) {
-      const rect = this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x39406a);
-      this.add.rectangle(x + w / 2, y + 2, w, 3, 0x4c548a); // top highlight
-      this.platforms.add(rect);
-    }
+    // Edge lighting collapses ~35 highlight GameObjects into ONE Graphics
+    // with ~70 baked fillRects, drawn at create and never again — a net
+    // reduction in scene objects versus WP6.
+    this.terrainGfx = this.add.graphics().setDepth(FX.depth.terrain + 0.5);
+    const collapse = new Set(this.map.collapseIdx ?? []);
+    this.map.platforms.forEach(([x, y, w, h], i) => {
+      // Escalation-2 collapse platforms are MARKED from frame one
+      // (cracked tile). The crumble mechanic itself needs a host-side
+      // scheduler + a per-platform event = a gameplay change; deferred.
+      const key = collapse.has(i) ? 'tileWallCracked' : 'tileWall';
+      const ts = this.add.tileSprite(x + w / 2, y + h / 2, w, h, key)
+        .setDepth(FX.depth.terrain);
+      ts.setTilePosition(x % FX.tile.size, y % FX.tile.size);
+      this.platforms.add(ts);
+      this.terrainGfx.fillStyle(COLORS.surfaceTop, 1).fillRect(x, y, w, 3);
+      this.terrainGfx.fillStyle(COLORS.surfaceShade, 1).fillRect(x, y + h - 2, w, 2);
+    });
 
     // ----- world furniture: doors + pickups + labels (ALL modes) -----
     // Both host and client build these from map data; only state changes
@@ -108,23 +149,34 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.relic, this.doorsGroup);
       }
     }
+    // Exit portal (art-spec §2.8): pure dressing, derived from EXISTING
+    // map data (exitZone bottom-center). NO body, NO interaction —
+    // RelicSystem's win check stays the rect test it already is.
+    if (this.map.exitZone) {
+      const [ex, ey, ew, eh] = this.map.exitZone;
+      const px = ex + ew / 2, py = ey + eh - 38;
+      this.add.image(px, py, 'portalArch').setDepth(FX.depth.furniture);
+      this.portalRings = this.add.image(px, py, 'portalRings')
+        .setDepth(FX.depth.furniture + 1);
+    }
     for (const l of this.map.labels ?? []) {
       this.add.text(l.x, l.y, l.text, {
         fontFamily: 'Courier New, monospace', fontSize: '10px', color: '#565d75',
-      }).setOrigin(0.5);
+      }).setOrigin(0.5).setDepth(FX.depth.decal);
     }
     // WP6 (contract W14): ready-zone gold floor strip + label, drawn from
     // map data on ALL modes (the ring itself is LobbyUI's).
     if (this.map.readyZone) {
       const z = this.map.readyZone;
-      this.add.rectangle(z.x + z.w / 2, z.y + z.h - 4, z.w, 8, 0xffd23f, 0.35);
+      this.add.rectangle(z.x + z.w / 2, z.y + z.h - 4, z.w, 8, 0xffd23f, 0.35)
+        .setDepth(FX.depth.decal);
       this.add.text(z.x + z.w / 2, z.y + z.h + 6, 'VAULT ENTRANCE', {
         fontFamily: 'Courier New, monospace', fontSize: '10px', color: '#565d75',
-      }).setOrigin(0.5);
+      }).setOrigin(0.5).setDepth(FX.depth.decal);
     }
 
     // ----- grapple beams (one Graphics, redrawn every frame, all modes) -----
-    this.beamGfx = this.add.graphics();
+    this.beamGfx = this.add.graphics().setDepth(FX.depth.beam);
     this._beamRows = []; // last-drawn rows (debug overlay)
 
     // ----- monsters map (ALL modes; host shares the sim GOs, client holds
@@ -183,13 +235,11 @@ export class GameScene extends Phaser.Scene {
     }
     this.worldRow = null; // latest snapshot world row (client HUD)
 
-    // ----- minimal camera follow (WP5; WP7 polishes lookahead/deadzone) -----
-    // Follow only when the map exceeds the viewport — the lobby (960×540)
-    // stays static with no special case. Local view exists in every mode.
-    const localView = this.players.get(this.session.localSlot);
-    if (localView && (worldW > GAME_WIDTH || worldH > GAME_HEIGHT)) {
-      this.cameras.main.startFollow(localView, true, 0.12, 0.12);
-    }
+    // ----- camera (WP7: roundPixels + deadzone + lerped lookahead) -----
+    // setupCamera keeps the WP5 engage condition byte-for-byte (follow only
+    // when the map exceeds the viewport), so the lobby camera stays static
+    // and every WP6 world==screen assumption still holds there.
+    setupCamera(this);
 
     // ----- world-space UI (WP6): prompts, pings, ripples, aim, labels -----
     // Created BEFORE the net-handler registration + client backlog drain
@@ -197,6 +247,12 @@ export class GameScene extends Phaser.Scene {
     // shutdown only restores the OS cursor.
     this.lastInputFrame = null; // poll() consumes edges — cached once per frame
     this.worldUI = new WorldHUD(this);
+    // FX AFTER worldUI (so the NOISE_BURST handler's fx-wins branch has a
+    // live Fx to hit) and BEFORE the client backlog drain (replayed events
+    // must reach it, gated by net._replayDone). Never throws; safe in
+    // every mode, including a headless harness scene.
+    this.fx = new Fx(this);
+    this.fx.attachLocal(this.players.get(this.session.localSlot));
 
     // ----- UI overlay -----
     this.scene.launch('UI', { session: this.session, mode: this.mode });
@@ -243,6 +299,10 @@ export class GameScene extends Phaser.Scene {
       }
       if (this.mode === 'client') this.net.detachScene();
       this.worldUI.destroy(); // restores the OS cursor; GOs die with the scene
+      // Phase restarts cycle this scene constantly; an un-killed tween or
+      // timer here decays fps ACROSS rounds, which is the hardest kind of
+      // leak to notice. destroy() kills both and nulls this.fx.
+      this.fx?.destroy();
       this.scene.stop('UI');
     });
 
@@ -300,6 +360,9 @@ export class GameScene extends Phaser.Scene {
     if (this.players.has(slot)) return this.players.get(slot);
     const [sx, sy] = at || spawnFor(this.map, slot);
     const p = createPlayer(this, slot, sx, sy, this.mode !== 'client');
+    // art-spec §4.1: the local player always wins player-vs-player overlap
+    // on your own screen. Accessories are container children and inherit.
+    p.setDepth(slot === this.session.localSlot ? FX.depth.local : FX.depth.remote);
     if (this.mode !== 'client') {
       this.physics.add.collider(p, this.platforms);
       this.physics.add.collider(p, this.doorsGroup); // intact doors are walls
@@ -307,12 +370,16 @@ export class GameScene extends Phaser.Scene {
       this.sim.players.set(slot, p);
     }
     this.players.set(slot, p);
+    // The camera follows a GameObject reference, and rejoin DESTROYS the
+    // old view — re-point it or the camera keeps chasing a dead object.
+    if (slot === this.session.localSlot) this.fx?.attachLocal(p);
     return p;
   }
 
   _removePlayer(slot) {
     const p = this.players.get(slot);
     if (!p) return;
+    if (slot === this.session.localSlot) this.fx?.attachLocal(null);
     destroyPlayer(p);
     this.players.delete(slot);
     this.sim?.players.delete(slot);
@@ -390,8 +457,13 @@ export class GameScene extends Phaser.Scene {
     } else if (phase === PHASE.LOBBY && this.mapId !== 'lobby') {
       this.net?.resetInterpolation?.();
       this.scene.restart({ mode: this.mode, mapId: 'lobby', session: this.session, net: this.net });
+    } else if (phase === PHASE.RESULTS) {
+      // No restart — the world idles behind the modal. Release the camera
+      // here rather than only on RUN_OVER so the debug R key and a real
+      // run end behave identically: a camera drifting behind a results
+      // panel is noise, and following a body nobody is driving is worse.
+      this.fx?.attachLocal(null);
     }
-    // RESULTS: no restart — UIScene shows the overlay; world idles behind it.
   }
 
   _onJoin({ slot, name, rejoined }) {
@@ -467,7 +539,7 @@ export class GameScene extends Phaser.Scene {
   // ---------------- update ----------------
 
   update(time, delta) {
-    if (this.mode === 'client') return this._clientUpdate();
+    if (this.mode === 'client') return this._clientUpdate(Math.min(delta, 50) / 1000);
 
     const dt = Math.min(delta, 50) / 1000; // clamp (plan §2.4 / risk 7)
     // poll() consumes edges — ONE poll per frame, cached for the WorldHUD
@@ -515,10 +587,12 @@ export class GameScene extends Phaser.Scene {
       ([slot, g]) => ({ slot, x: g.x, y: g.y, tx: g.tx, ty: g.ty })));
     this._cosmetics();
     this.worldUI.update();
+    this.fx?.update(dt);
     this._debug();
   }
 
-  _clientUpdate() {
+  /** @param {number} dt seconds, clamped — Fx derives kinematics from it */
+  _clientUpdate(dt) {
     this.lastInputFrame = this.inputManager.poll();
     this.net.pushFrame(this.lastInputFrame);
     const interp = this.net.interpolator.interp('x y', 'players');
@@ -532,7 +606,20 @@ export class GameScene extends Phaser.Scene {
       this.net.interpolator.interp('x y tx ty', 'grapples')));
     this._cosmetics();
     this.worldUI.update();
+    this.fx?.update(dt);
     this._debug();
+  }
+
+  /**
+   * World point → UIScene screen point. An IDENTITY transform whenever
+   * the camera is static (every lobby today), so it cannot regress the
+   * shipped WP6 widgets — it just makes any UIScene widget anchored to
+   * world coordinates unconditionally correct once a stage larger than
+   * the viewport gets one.
+   */
+  toScreen(x, y) {
+    const v = this.cameras.main.worldView;
+    return { x: x - v.x, y: y - v.y };
   }
 
   /**
@@ -566,6 +653,9 @@ export class GameScene extends Phaser.Scene {
   /** @param {Array<{slot,x,y,tx,ty}>} rows — empty array = no beams drawn */
   _drawBeams(rows) {
     this._beamRows = rows;
+    // WP7 owns beam styling (art-spec §3.1: 3 px body + 1 px ink core +
+    // rotated diamond tip). The WP1 line below is the Fx-less fallback.
+    if (this.fx) return this.fx.drawBeams(rows);
     this.beamGfx.clear();
     for (const b of rows) {
       const color = PLAYER.colors[b.slot % 4];
@@ -589,7 +679,9 @@ export class GameScene extends Phaser.Scene {
       `mode ${this.mode}  map ${this.mapId}  phase ${this.session.phase}`,
       `slot ${this.session.localSlot}  players ${this.players.size}` +
         (this.session.roomCode ? `  room ${this.session.roomCode}` : ''),
-      `fps ${this.game.loop.actualFps.toFixed(0)}`,
+      `fps ${this.game.loop.actualFps.toFixed(0)}` +
+        (this.fx ? `  fxP ${this.fx._liveCached}/${FX.particleCap}` +
+          `  fxT ${this.fx._tweens.size}  fxDrop ${this.fx.drops}` : ''),
     ];
     if (local) {
       lines.splice(2, 0,
