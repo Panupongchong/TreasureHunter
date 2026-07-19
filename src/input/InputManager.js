@@ -32,6 +32,13 @@ const DEADZONE = 0.25;
  * }} InputFrame */
 
 export class InputManager {
+  /**
+   * WP6: last-used device for prompt glyphs (ux-spec §0.5) — 'kb'|'pad'.
+   * STATIC: one truth across scenes; poll() updates it from real
+   * activity edges, FocusNav/MenuScene update it from menu input.
+   */
+  static lastDevice = 'kb';
+
   /** @param {Phaser.Scene} scene */
   constructor(scene) {
     this.scene = scene;
@@ -102,6 +109,20 @@ export class InputManager {
       const world = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
       aimX = world.x;
       aimY = world.y;
+    }
+
+    // ----- last-used device (WP6 glyphs): actual ACTIVITY, not presence -----
+    if (pad && (pad.A || pad.B || pad.X || pad.Y || pad.L1 || pad.R2 > 0.5 ||
+        this._padButton(pad, 11) ||
+        Math.abs(pad.axes[0]?.getValue() ?? 0) > DEADZONE ||
+        Math.hypot(pad.axes[2]?.getValue() ?? 0, pad.axes[3]?.getValue() ?? 0) > DEADZONE)) {
+      InputManager.lastDevice = 'pad';
+    } else if (this.keys.left.isDown || this.keys.right.isDown ||
+        this.keys.left2.isDown || this.keys.right2.isDown ||
+        this.keys.jump.isDown || this.keys.interact.isDown ||
+        this.keys.grab.isDown || this.keys.ping.isDown ||
+        pointer.leftButtonDown() || pointer.rightButtonDown()) {
+      InputManager.lastDevice = 'kb';
     }
 
     // ----- edges -----

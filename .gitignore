@@ -1,3 +1,10 @@
 node_modules/
 dist/
 .DS_Store
+
+# Acceptance-harness byproducts. The scratchpad/*.mjs suites ARE tracked —
+# the WP1-WP4 ones were lost once and cost a session to rebuild — but the
+# headless-Chrome profiles are ~1.7 GB and the shots/logs are per-run.
+scratchpad/tmp-*/
+scratchpad/*-shots/
+scratchpad/*.log

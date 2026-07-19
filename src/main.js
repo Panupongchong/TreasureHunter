@@ -2,12 +2,14 @@ import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, PHYSICS } from './config.js';
 import { MenuScene } from './scenes/MenuScene.js';
 import { GameScene } from './scenes/GameScene.js';
+import { UIScene } from './scenes/UIScene.js';
 
 // Phaser is attached to window so scene files can use the global
 // `Phaser.Input.Keyboard.KeyCodes` etc. without re-importing.
 window.Phaser = Phaser;
 
-new Phaser.Game({
+// Exposed for debugging and headless acceptance tests.
+window.game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'app',
   width: GAME_WIDTH,
@@ -27,5 +29,5 @@ new Phaser.Game({
   input: {
     gamepad: true,
   },
-  scene: [MenuScene, GameScene],
+  scene: [MenuScene, GameScene, UIScene],
 });
