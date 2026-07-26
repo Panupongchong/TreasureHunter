@@ -110,9 +110,11 @@ export class RelicSystem {
 
     // 5. Escape objective — RelicSystem owns the win (D12): the HOLDER
     //    (hands OR bag) inside the exit zone. A loose/flying relic in the
-    //    zone does NOT win (no hurl-to-win). A stunned-but-bagged holder
-    //    thrown in DOES (intended comedy). clockRunning=false freezes the
-    //    clock and mutually excludes the calamity double-fire.
+    //    zone does NOT win (no hurl-to-win). The holder must walk it in
+    //    under his own power: a stun now bursts the bag too, so there is no
+    //    "haul the stunned carrier over the line" finish any more.
+    //    clockRunning=false freezes the clock and mutually excludes the
+    //    calamity double-fire.
     if (sim.world.clockRunning && sim.session.phase === PHASE.PLAYING &&
         (st.rs === 'held' || st.rs === 'bagged')) {
       const holder = sim.players.get(st.holderSlot);
@@ -211,21 +213,45 @@ export class RelicSystem {
 
   // ---------------- API called by StunSystem.applyStun ----------------
 
-  /** Hands → loose + noise burst; bag → SECURE (no-op). CLAUDE.md table.
-   *  Pop direction: away from the stun source when the shove gave the body
-   *  a direction, else opposite carrier facing — never at rest underfoot. */
+  /** Hands → loose + noise burst. Bag → the bag BURSTS: the relic is flung on a
+   *  random upward heading as `flying` (design change — bagged is no longer
+   *  stun-proof; it is only throw/grapple-proof while you stay upright).
+   *
+   *  Flung, not dropped, and deliberately so: `flying` is the catchable state,
+   *  so the recovery is a teammate reading the arc and grapple-catching it. It
+   *  costs the team a scramble instead of silently costing them the relic.
+   *  Either way the carrier loses it, so both branches pay relicDropBurst noise.
+   *
+   *  Hands pop direction: away from the stun source when the shove gave the
+   *  body a direction, else opposite carrier facing — never at rest underfoot. */
   dropOnStun(sim, p) {
     const c = p.state.carrying;
     if (c?.kind !== 'relic') return;
-    if (c.where === 'bag') return; // SECURE
+    const bagged = c.where === 'bag';
     p.state.carrying = null;
     const st = sim.relic.state;
+    // Nobody is locked out: the carrier is stunned and cannot re-grab anyway,
+    // so teammates get to react on frame one.
     st.lockoutSlot = null;
     st.lockoutMs = 0;
-    const vx = p.body.velocity.x;
-    const dir = Math.abs(vx) > 50 ? Math.sign(vx) : -p.state.facing;
-    const pop = dir * (RELIC.dropPopVx + (Math.random() * 2 - 1) * RELIC.dropPopVxJitter);
-    this._dropLoose(sim, p.x, p.y - 6, pop, -RELIC.dropPopVy);
+
+    if (bagged) {
+      const span = RELIC.bagEjectMaxDeg - RELIC.bagEjectMinDeg;
+      const a = (RELIC.bagEjectMinDeg + Math.random() * span) * Math.PI / 180;
+      const dir = { x: Math.cos(a), y: -Math.sin(a) }; // -sin: screen y is down
+      st.rs = 'flying';
+      st.holderSlot = null;
+      sim.relic.body.reset(p.x + dir.x * 20, p.y + dir.y * 20 - 4);
+      sim.relic.body.enable = true;
+      sim.relic.body.setDragX(0); // fly clean; loose drag returns on landing
+      sim.relic.body.setVelocity(dir.x * RELIC.bagEjectSpeed, dir.y * RELIC.bagEjectSpeed);
+      emitRelicState(sim);
+    } else {
+      const vx = p.body.velocity.x;
+      const dir = Math.abs(vx) > 50 ? Math.sign(vx) : -p.state.facing;
+      const pop = dir * (RELIC.dropPopVx + (Math.random() * 2 - 1) * RELIC.dropPopVxJitter);
+      this._dropLoose(sim, p.x, p.y - 6, pop, -RELIC.dropPopVy);
+    }
     addNoise(sim, p.x, p.y, NOISE.relicDropBurst, 'relicDrop', p.state.slot);
   }
 

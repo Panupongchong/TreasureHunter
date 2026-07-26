@@ -401,6 +401,15 @@ export const RELIC = {
   dropPopVx: 150,         // stun/disconnect drop: horizontal pop away from the
   dropPopVxJitter: 40,    //   stun source (shove sign), else opposite facing;
   dropPopVy: 280,         //   upward pop ~28 px hop — visible, never underfoot
+  bagEjectSpeed: 520,     // BAGGED stun-eject: the bag bursts and the relic is
+                          // flung on a random heading. Below throwSpeed (760) so
+                          // it stays catchable — it enters `flying`, not `loose`,
+                          // so a teammate can grapple-catch or hand-catch it.
+                          // 520 ≈ 195 px flat range @45°: it leaves your feet but
+                          // rarely clears the deck you're standing on
+  bagEjectMinDeg: 30,     // eject cone, degrees above horizontal (either side).
+  bagEjectMaxDeg: 150,    //   Always upward: a downward roll would bury the relic
+                          //   in the floor under the stunned body
   holdOffsetX: 16, holdOffsetY: -6,  // in-hands: front of carrier (facing-signed)
   bagOffsetX: 12, bagOffsetY: -14,   // bagged: on the back (opposite facing)
   tombstoneOffsetY: -40,  // bagged-at-tombstone pin height

@@ -94,13 +94,21 @@ Relic mass 1.0; carrier becomes 2.0. Two carry states:
 | | In hands | In bag |
 |---|---|---|
 | Pickup | instant grab | channel ~3s (interruptible by damage) |
-| On stun | dropped + noise | secure |
+| On stun | dropped + noise | bag bursts: flung on a random upward arc (catchable) + noise |
 | Throw / grapple-transfer | yes | no (unbag first, ~2s channel) |
 | Attack/grapple while holding | no | yes |
 
 Transfers: throw relic + teammate grapple-catches mid-air. Loose relic can be
 grapple-fished (1.0 vs 1.0 = both slide). Bag stow/unstow makes small noise so
 cautious play still feeds the gauge.
+
+**Bagging is not stun-proof** (revised): a stun bursts the bag and flings the
+relic on a random upward arc. It enters the *flying* state, so a teammate can
+grapple-catch or hand-catch it — losing it is a scramble, not a silent loss.
+The bag still protects against throws and grapple-transfer while you stay
+upright; it buys you a free hand, not immunity. Consequences: a stunned player
+never carries the relic, so hauling a stunned carrier over the finish line is
+no longer a win route, and the objective can't ride along inside a rescue.
 
 ## Two pressure systems
 

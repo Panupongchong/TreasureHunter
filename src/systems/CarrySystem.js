@@ -51,11 +51,12 @@ export function grab(sim, p) {
   for (const [, target] of sim.players) {
     if (target === p) continue;
     const ts = target.state;
-    // A bagged relic survives the stun and rides along with its holder
-    // (CLAUDE.md: a stunned player CAN be hauled — the objective carrier
-    // most of all). Any other carrying state still blocks the grab.
+    // Only stunned teammates can be hauled, and a stun now empties the hands
+    // AND bursts the bag (RelicSystem.dropOnStun), so a grabbable target is
+    // never carrying anything. You haul the player; the relic is already
+    // loose or in the air behind you — someone else has to go get it.
     if (!ts.stunned || ts.carriedBy !== null) continue;
-    if (ts.carrying && !(ts.carrying.kind === 'relic' && ts.carrying.where === 'bag')) continue;
+    if (ts.carrying) continue;
     if (Math.abs(target.x - p.x) > CARRY.grabRange ||
         Math.abs(target.y - p.y) > CARRY.grabRange) continue;
     ts.carriedBy = s.slot;
