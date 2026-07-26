@@ -112,7 +112,7 @@ no longer a win route, and the objective can't ride along inside a rescue.
 
 ## Two pressure systems
 
-**Clock (strategic).** ~12-min countdown; zero = calamity = loss (only loss).
+**Clock (strategic).** ~10-min countdown; zero = calamity = loss (only loss).
 ONLY movement shortcuts cost time: smash door −20s, blast rubble −25s,
 break shortcut −15s, kick bridge −10s. Every barrier has loud/fast/costly vs
 quiet/slow/free (often co-op) alternatives. Smash cost ≈ 1.5–2× the quiet
@@ -192,7 +192,7 @@ menu → connecting → lobby → playing → results → lobby | menu
 
 ## Tuning defaults (v1, all adjustable)
 
-12-min clock · smash −20s · noise gauge ≈ 10 loud actions to spawn ·
+10-min clock · smash −20s · noise gauge ≈ 10 loud actions to spawn ·
 stun 6s · hoist = constant force, +100% per extra grappler ·
 velocity inheritance on stacks 80% · FF damage 50%
 

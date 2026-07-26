@@ -1,7 +1,7 @@
 // ============================================================
 // ClockSystem — the strategic pressure clock (plan WP4; CLAUDE.md).
 //
-// 12-min countdown starts on 'playing' entry (the phase transition
+// 10-min countdown starts on 'playing' entry (the phase transition
 // restarts GameScene -> fresh Sim -> init runs with session.phase
 // already 'playing'). Escalation levels at <6 min and <3 min (monotonic,
 // emitted once). Clock zero = calamity = the ONLY loss.

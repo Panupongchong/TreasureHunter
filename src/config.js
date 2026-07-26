@@ -60,7 +60,11 @@ export const CARRY = {
 
 // ---------- Clock economy (only movement shortcuts cost time) ----------
 export const CLOCK = {
-  sessionMs: 12 * 60 * 1000,
+  sessionMs: 10 * 60 * 1000, // 12 → 10 min: playtest ended with minutes to
+                             // spare. The Undervault doubled in width in the
+                             // same pass, so the shorter clock buys tension,
+                             // not a shorter heist
+
   smashDoorMs: 20 * 1000,
   blastRubbleMs: 25 * 1000,
   breakShortcutMs: 15 * 1000,
