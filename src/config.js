@@ -172,8 +172,9 @@ export const PING = {
   gamepadDist: 200,        // px from player along R-stick dir (ux-spec §7.8)
 };
 
-// Stage board cycle order (lobby excluded; one entry today, built for more).
-export const STAGES = ['test'];
+// Stage board cycle order (lobby excluded). Must stay in sync with MAPS in
+// maps/mapTypes.js — getMap() throws on an id it doesn't know.
+export const STAGES = ['test', 'shaft'];
 
 export const RESULTS = {
   ruinousFfWeight: 2,      // award score = timeCostMs/1000 + weight * ffDealt

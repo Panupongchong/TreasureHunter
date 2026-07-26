@@ -55,8 +55,13 @@
 
 import { lobbyMap } from './lobbyMap.js';
 import { testMap } from './testMap.js';
+import { shaftMap } from './shaftMap.js';
 
-const MAPS = { [lobbyMap.id]: lobbyMap, [testMap.id]: testMap };
+const MAPS = {
+  [lobbyMap.id]: lobbyMap,
+  [testMap.id]: testMap,
+  [shaftMap.id]: shaftMap,
+};
 
 /** @returns the map for a stage/map id; throws on unknown ids (typo guard). */
 export function getMap(id) {
