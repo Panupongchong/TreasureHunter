@@ -141,7 +141,7 @@ export class GrappleSystem {
     if (len <= 2) return false;
     const t = (len - 2) / len;
     const line = new Phaser.Geom.Line(x1, y1, x1 + dx * t, y1 + dy * t);
-    for (const rect of this._terrainRects(sim)) {
+    for (const rect of terrainRects(sim)) {
       if (Phaser.Geom.Intersects.LineToRectangle(line, rect)) return true;
     }
     return false;
