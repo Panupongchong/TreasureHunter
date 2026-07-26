@@ -32,6 +32,14 @@
 //     board: {x, y} | undefined   // WP6: stage board CENTER (lobby). Host-only
 //                  // 0.5 s interact channel cycles config.STAGES; maps
 //                  // without it never match the 'board' channel
+//     // ---- traversal mode (PROTOTYPE, config.TRAVERSAL) ----
+//     traversal: 'zip' | undefined // opt in to the no-jump, zip-only
+//                  // prototype. Absent = jump, which every shipped map
+//                  // needs (their gaps and rises are keyed to jump apex)
+//     anchors:  [{x, y, id?}]     // authored grapple attach points, mid-air
+//                  // allowed. Only consulted when TRAVERSAL.anchorsOnly
+//     noAnchorIdx: [n, ...]       // platform indices that contribute NO
+//                  // auto-derived lips — a smooth, unhookable surface
 //     labels:   [{x, y, text}]    // cosmetic map annotations
 //     monsterSpawns: [{id, type:'skulker'|'brute', x, y, dummy?:true}]
 //                  // consumed by MonsterSystem; dummy = never aggros (lobby pen)
@@ -56,11 +64,13 @@
 import { lobbyMap } from './lobbyMap.js';
 import { testMap } from './testMap.js';
 import { shaftMap } from './shaftMap.js';
+import { zipArena } from './zipArena.js';
 
 const MAPS = {
   [lobbyMap.id]: lobbyMap,
   [testMap.id]: testMap,
   [shaftMap.id]: shaftMap,
+  [zipArena.id]: zipArena,
 };
 
 /** @returns the map for a stage/map id; throws on unknown ids (typo guard). */

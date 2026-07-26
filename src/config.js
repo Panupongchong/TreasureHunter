@@ -178,7 +178,7 @@ export const PING = {
 
 // Stage board cycle order (lobby excluded). Must stay in sync with MAPS in
 // maps/mapTypes.js — getMap() throws on an id it doesn't know.
-export const STAGES = ['test', 'shaft'];
+export const STAGES = ['test', 'shaft', 'zip'];
 
 export const RESULTS = {
   ruinousFfWeight: 2,      // award score = timeCostMs/1000 + weight * ffDealt
@@ -381,6 +381,64 @@ export const GRAPPLE = {
   fireCooldownMs: 150,  // lockout between attach attempts after a detach (edge-mash guard;
                         // 'refire' retarget bypasses it)
 };
+
+// ---------- Traversal mode (PROTOTYPE — nothing here is locked) ----------
+// The question being tested: remove jump, navigate by zip, and let the
+// LEVEL decide how fast you cross it by deciding where the anchors are.
+//
+// PER-MAP, not global. A map opts in with `traversal: 'zip'`; every map
+// without it keeps jump, because the shipped levels are keyed to jump
+// apex 112 / carrier 56 and would be unplayable without it. That is what
+// makes this safe to iterate on: zipArena flips, testMap and shaftMap
+// don't, and both run in the same build.
+export const TRAVERSAL = {
+  // The shipped mode. These values reproduce today's behaviour exactly.
+  jump: {
+    jumpEnabled: true,
+    autoStep: false, stepHeight: 0,
+    twoStage: false,
+    anchorsOnly: false, anchorSnap: 0,
+    zipSpeed: GRAPPLE.zipSpeed, massScaledZip: false,
+    launcherInherit: 0,
+    tetherMaxMs: 0,
+  },
+  // The prototype.
+  zip: {
+    jumpEnabled: false,   // the whole point
+    autoStep: true,
+    stepHeight: 40,       // ONE 40 px tile at mass 1.0; actual = stepHeight/mass,
+                          // so a relic carrier (2.0) climbs 20 px — nothing on
+                          // this grid. Hence the level-design law: an obstacle is
+                          // either one tile (free) or two-plus tiles (hook only),
+                          // and the relic never walks up anything
+    twoStage: true,       // press 1 hooks and the line goes slack (you keep your
+                          // momentum), press 2 reels, press 3 lets go still
+                          // carrying whatever speed you built. The window between
+                          // presses is where the skill lives
+    anchorsOnly: true,    // terrain attaches ONLY at anchor points: platform lips
+                          // (auto-derived, suppressible per platform) plus
+                          // whatever the map authors in `anchors`
+    anchorSnap: 56,       // px of perpendicular slop when aiming at an anchor —
+                          // hooking a 1 px corner with a raw ray is not a skill,
+                          // it is a chore. Bigger than aimAssistRadius (48) on
+                          // purpose: this is not assist, it is the hitbox
+    zipSpeed: 650,        // nerfed from 900. Hooking terrain is workmanlike;
+                          // hooking a braced TEAMMATE is the fast route. That
+                          // asymmetry is what makes the team the traversal network
+                          // instead of a convenience
+    massScaledZip: true,  // reel speed *= 1/mass — the carrier is heavy ON THE
+                          // LINE too, not just on foot. Restores the mass rule to
+                          // the verb that replaced jump (jumpMult used to carry it)
+    launcherInherit: PVP.velocityInheritance, // let go of a PLAYER anchor and you
+                          // keep 80% of their velocity: a launcher who sprints
+                          // away as you release adds their speed to your shot.
+                          // Same number, same idea as the old boost-jump stack
+    tetherMaxMs: 4000,    // a hook you never commit to gives up
+  },
+};
+
+/** Traversal settings for a map (maps without `traversal` keep jump). */
+export const traversalFor = (map) => TRAVERSAL[map?.traversal] ?? TRAVERSAL.jump;
 
 // ---------- Relic (the objective; carrier mass rule is MASS.relic) ----------
 // All numbers from the WP5 design spec §A (game designer authority).

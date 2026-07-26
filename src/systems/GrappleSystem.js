@@ -26,19 +26,21 @@
 // most one tick late, invisible at 60 Hz.
 // ============================================================
 
-import { GRAPPLE, NOISE } from '../config.js';
+import { GRAPPLE, NOISE, massSpeedMult, traversalFor } from '../config.js';
 import { EV } from '../net/protocol.js';
 import { cancelFallStun } from './FallStunSystem.js';
 import { addNoise } from './NoiseSystem.js';
+import { terrainRects, terrainAnchors, invalidateTerrain } from '../sim/terrain.js';
 
 export class GrappleSystem {
   init(sim) {
     sim.grapple = this; // discovery handle for WP4/WP5 (sim.grapple.detachAll…)
-    this._rects = null; // lazy Phaser.Geom.Rectangle[] platform bounds cache
+    this._sim = sim;    // invalidateTerrain() is called with no args (DoorSystem)
   }
 
   update(sim, dt) {
     const msDt = dt * 1000;
+    const T = traversalFor(sim.scene.map);
     for (const [, p] of sim.players) { // normalize (rejoin/late-add safe)
       p.state.grapple ??= null;
       p.state.grappleCdMs = Math.max(0, (p.state.grappleCdMs ?? 0) - msDt);
@@ -47,43 +49,25 @@ export class GrappleSystem {
     for (const slot of [...sim.grapples.keys()]) {
       if (!sim.players.has(slot)) sim.grapples.delete(slot);
     }
-    this._detachPass(sim);
-    this._firePass(sim);
-    this._applyPass(sim, dt);
-  }
-
-  // ---------------- terrain cache ----------------
-
-  _terrainRects(sim) {
-    // Platforms + INTACT doors (doors are walls: they occlude LOS and
-    // block casts too). Door rects carry their doorId so _castRay can
-    // report targetKind 'door' + targetId on the wire; broken doors are
-    // dropped on the invalidateTerrain() rebuild (DoorSystem.breakDoor).
-    return this._rects ??= [
-      ...sim.scene.platforms.getChildren().map((go) => go.getBounds()),
-      ...[...sim.doors.values()]
-        .filter((d) => d.state.state === 'intact')
-        .map((d) => {
-          const r = d.getBounds();
-          r.doorId = d.state.id;
-          return r;
-        }),
-    ];
+    this._detachPass(sim, T, msDt);
+    this._firePass(sim, T);
+    this._applyPass(sim, dt, T);
   }
 
   /** WP4 seam: DoorSystem.breakDoor calls sim.grapple.invalidateTerrain()
-   *  so the cast/LOS cache rebuilds without the broken door. */
+   *  so the cast/LOS/anchor caches rebuild without the broken door. */
   invalidateTerrain() {
-    this._rects = null;
+    invalidateTerrain(this._sim);
   }
 
   // ---------------- pass A: detach poll (D1..D9) ----------------
 
-  _detachPass(sim) {
+  _detachPass(sim, T, msDt) {
     for (const [slot, p] of sim.players) {
       const s = p.state;
       const g = s.grapple;
       if (!g) continue;
+      g.ageMs = (g.ageMs ?? 0) + msDt;
 
       // D1/D2: owner stunned / grabbed / picked something up mid-grapple
       // (Carry runs after Grapple, so this catches it next tick).
@@ -92,8 +76,16 @@ export class GrappleSystem {
         detachGrapple(sim, p, 'carried'); continue;
       }
       // D3: release (disconnected slots get nullInput → auto-release).
-      if (!sim.inputFor(slot).grappleHeld) {
+      // Two-stage mode owns its own lifetime: the line is press-driven, so
+      // letting the button go between the hook and the reel must NOT drop
+      // it. A hook you never commit to expires instead (D3b).
+      if (!T.twoStage && !sim.inputFor(slot).grappleHeld) {
         detachGrapple(sim, p, 'release'); continue;
+      }
+      // D3b: uncommitted tether timeout (two-stage only).
+      if (T.twoStage && g.phase === 'hooked' && T.tetherMaxMs &&
+          g.ageMs > T.tetherMaxMs) {
+        detachGrapple(sim, p, 'tetherExpired'); continue;
       }
 
       let tipX, tipY;
@@ -123,7 +115,9 @@ export class GrappleSystem {
       if (this._losBlocked(sim, p.x, p.y, tipX, tipY)) {
         detachGrapple(sim, p, 'los'); continue;
       }
-      if (g.targetKind === 'terrain') {
+      // A slack hook neither arrives nor cares what it is pressed against:
+      // arrival and obstruction only mean something once you are reeling.
+      if (g.targetKind === 'terrain' && g.phase !== 'hooked') {
         // D8: arrival.
         if (dist <= GRAPPLE.arriveRadius) { detachGrapple(sim, p, 'arrived'); continue; }
         // D9: blocked in the travel direction (flags are from the previous
@@ -155,22 +149,42 @@ export class GrappleSystem {
 
   // ---------------- pass B: fire (edge → gate → aim → cast → attach) ----------------
 
-  _firePass(sim) {
+  _firePass(sim, T) {
     for (const [slot, p] of sim.players) {
       const s = p.state;
       const frame = sim.inputFor(slot);
       if (!frame.grapple) continue;
       if (!canFireGrapple(s)) continue;
+
+      // ---- two-stage: the press means something different each beat ----
+      // 1 hook (handled below) · 2 commit the reel · 3 let go, keeping
+      // whatever speed the reel built. Beat 3 is the momentum tech: you
+      // choose the release point, so a hook ahead of you is a slingshot
+      // rather than a taxi that always parks at the anchor.
+      if (T.twoStage && s.grapple) {
+        if (s.grapple.phase === 'hooked') {
+          s.grapple.phase = 'reeling';
+          if (s.grapple.targetKind === 'terrain') p.body.setAllowGravity(false);
+          sim.emit({ kind: EV.GRAPPLE_ATTACH, slot,
+            targetKind: 'reel', targetId: s.grapple.targetId ?? null,
+            x: Math.round(s.grapple.tipX), y: Math.round(s.grapple.tipY) });
+        } else {
+          detachGrapple(sim, p, 'letGo');
+        }
+        continue;
+      }
       // Re-press while attached = instant retarget (no cooldown charged).
       if (s.grapple) detachGrapple(sim, p, 'refire');
       if (s.grappleCdMs > 0) continue;
 
       const { dir, assisted } = this._resolveAim(sim, p, frame);
-      const hit = this._castRay(sim, p.x, p.y, dir, GRAPPLE.maxRange, slot);
+      const hit = this._castRay(sim, p.x, p.y, dir, GRAPPLE.maxRange, slot, T);
       if (!hit) continue; // whiff: no event (WP7 may add a local whiff FX)
 
+      const phase = T.twoStage ? 'hooked' : 'reeling';
       if (hit.kind === 'terrain') {
         s.grapple = {
+          phase,
           // Door anchors keep targetId = the door id ('d*') so grapplesOn/
           // detachAll match it — breakDoor's detachAll(sim, doorId,
           // 'targetGone') drops zips mid-flight; detachGrapple restores
@@ -180,9 +194,12 @@ export class GrappleSystem {
           tipX: hit.x, tipY: hit.y,
           assist: false,
         };
-        p.body.setAllowGravity(false); // straight zip line, no sag
+        // Gravity off only while REELING — a slack hook leaves you
+        // ballistic, which is the whole point of the pause between presses.
+        if (phase === 'reeling') p.body.setAllowGravity(false);
       } else {
         s.grapple = {
+          phase,
           targetKind: 'entity', targetId: hit.id,
           tipX: hit.go.x, tipY: hit.go.y,
           targetStunnedAtAttach: !!hit.go.state?.stunned,
@@ -230,7 +247,7 @@ export class GrappleSystem {
    *  (terrain occludes targets and vice versa). minRange filters PER
    *  INTERSECTION, not on the winner: a touching teammate must not mask
    *  terrain behind him. */
-  _castRay(sim, x, y, dir, maxLen, selfSlot) {
+  _castRay(sim, x, y, dir, maxLen, selfSlot, T) {
     const line = new Phaser.Geom.Line(x, y, x + dir.x * maxLen, y + dir.y * maxLen);
     let best = null; // {kind, id, go, x, y, dist}
     const consider = (kind, id, go, pts) => {
@@ -240,22 +257,44 @@ export class GrappleSystem {
         if (!best || d < best.dist) best = { kind, id, go, x: pt.x, y: pt.y, dist: d };
       }
     };
-    for (const rect of this._terrainRects(sim)) {
-      // Door rects carry rect.doorId (WP4) — plain terrain stays id null.
-      consider('terrain', rect.doorId ?? null, null,
-        Phaser.Geom.Intersects.GetLineToRectangle(line, rect));
+    if (T.anchorsOnly) {
+      // Anchor mode: terrain is not a surface you stick to, it is a set of
+      // POINTS. Match like the gamepad assist does — nearest along the ray,
+      // within anchorSnap perpendicular — so a lip is a target you can
+      // actually hit at speed. LOS is checked per anchor because terrain no
+      // longer enters the nearest-hit contest to occlude anything.
+      for (const a of terrainAnchors(sim)) {
+        const tox = a.x - x, toy = a.y - y;
+        const along = tox * dir.x + toy * dir.y;
+        if (along < GRAPPLE.minRange || along > maxLen) continue;
+        const perp = Math.hypot(tox - along * dir.x, toy - along * dir.y);
+        if (perp > T.anchorSnap) continue;
+        if (best && along >= best.dist) continue;
+        if (this._losBlocked(sim, x, y, a.x, a.y)) continue;
+        best = { kind: 'terrain', id: a.id, go: null, x: a.x, y: a.y, dist: along };
+      }
+    } else {
+      for (const rect of terrainRects(sim)) {
+        // Door rects carry rect.doorId (WP4) — plain terrain stays id null.
+        consider('terrain', rect.doorId ?? null, null,
+          Phaser.Geom.Intersects.GetLineToRectangle(line, rect));
+      }
     }
     for (const cand of dynamicTargets(sim, selfSlot)) {
       const b = cand.go.body;
       const rect = new Phaser.Geom.Rectangle(b.x, b.y, b.width, b.height);
-      consider('entity', cand.id, cand.go, Phaser.Geom.Intersects.GetLineToRectangle(line, rect));
+      const pts = Phaser.Geom.Intersects.GetLineToRectangle(line, rect);
+      // Bodies still hide behind walls in anchor mode, where terrain rects
+      // are no longer in the contest to do the occluding for us.
+      if (T.anchorsOnly && pts.length && this._losBlocked(sim, x, y, cand.go.x, cand.go.y)) continue;
+      consider('entity', cand.id, cand.go, pts);
     }
     return best;
   }
 
   // ---------------- pass C: apply (zip / force integrate / beam mirror) ----------------
 
-  _applyPass(sim, dt) {
+  _applyPass(sim, dt, T) {
     /** GameObject -> {ax, ay} — the map accumulating makes multi-grapple SUM automatic. */
     const forces = new Map();
     const addForce = (go, ax, ay) => {
@@ -270,11 +309,19 @@ export class GrappleSystem {
       const g = p.state.grapple;
       if (!g) { sim.grapples.delete(slot); continue; }
 
-      if (g.targetKind === 'terrain') {
+      // A hooked-but-not-reeled line is pure decoration: no force, no
+      // steering, gravity still on. You keep running, falling, whatever —
+      // the line is just now attached to something.
+      if (g.phase === 'hooked') { g.tipX ??= p.x; g.tipY ??= p.y; }
+      else if (g.targetKind === 'terrain') {
         const ax = g.anchorX - p.x, ay = g.anchorY - p.y;
         const len = Math.hypot(ax, ay) || 1;
+        // Reel speed scales by 1/mass when the map asks: the relic carrier
+        // (2.0) reels at half, which is where jumpMult's tax went.
+        const speed = T.zipSpeed *
+          (T.massScaledZip ? massSpeedMult(grappleMass(p)) : 1);
         // Full ownership of both axes, AFTER MovementSystem ran.
-        p.body.setVelocity((ax / len) * GRAPPLE.zipSpeed, (ay / len) * GRAPPLE.zipSpeed);
+        p.body.setVelocity((ax / len) * speed, (ay / len) * speed);
         cancelFallStun(p); // a downward zip must not register as a fall
         g.tipX = g.anchorX; g.tipY = g.anchorY;
       } else {
@@ -319,6 +366,8 @@ export class GrappleSystem {
       sim.grapples.set(slot, {
         x: p.x, y: p.y, tx: g.tipX, ty: g.tipY,
         targetKind: g.targetKind, targetId: g.targetId,
+        phase: g.phase ?? 'reeling', // presentation: a slack hook should not
+                                     // read like a taut one (WP7 beam FX)
         assist: !!g.assist,
         dbgAccel: f ? Math.min(Math.hypot(f.ax, f.ay), GRAPPLE.maxPullAccel) : 0,
       });
@@ -341,6 +390,21 @@ export function canFireGrapple(s) {
 export function detachGrapple(sim, p, reason) {
   const s = p.state;
   if (!s.grapple) return;
+  const g = s.grapple;
+  // Launcher inheritance: let go of a PLAYER you were reeling toward and
+  // you take 80% of their velocity with you. A teammate who sprints away
+  // as you release adds their speed to your shot — the same trade the old
+  // boost jump asked for (timing with a partner), moved onto the line.
+  const T = traversalFor(sim.scene.map);
+  if (T.launcherInherit && g.phase === 'reeling' &&
+      g.targetKind === 'entity' && g.targetId?.[0] === 'p') {
+    const t = resolveTarget(sim, g.targetId);
+    if (t?.body) {
+      p.body.setVelocity(
+        p.body.velocity.x + T.launcherInherit * t.body.velocity.x,
+        p.body.velocity.y + T.launcherInherit * t.body.velocity.y);
+    }
+  }
   s.grapple = null;
   s.grappleCdMs = reason === 'refire' ? 0 : GRAPPLE.fireCooldownMs;
   p.body.setAllowGravity(true); // no-op unless terrain zip; always safe

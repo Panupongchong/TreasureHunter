@@ -17,12 +17,14 @@
 // boost jumps apex-timed (CLAUDE.md: pure skill, not a mechanic).
 // ============================================================
 
-import { PHYSICS, PVP, MASS, massSpeedMult, massJumpMult } from '../config.js';
+import { PHYSICS, PVP, MASS, massSpeedMult, massJumpMult, traversalFor } from '../config.js';
 import { nullInput } from '../net/protocol.js';
+import { terrainRects } from '../sim/terrain.js';
 
 export class MovementSystem {
   update(sim, dt) {
     const time = sim.scene.time.now;
+    const T = traversalFor(sim.scene.map);
     for (const [slot, p] of sim.players) {
       const s = p.state;
       if (s.carriedBy !== null) continue; // pinned by CarrySystem
@@ -30,11 +32,11 @@ export class MovementSystem {
       // runs — momentum + friction still apply (feel spec §2). NOT stun.
       const frame = (s.stunned || (s.staggerMsLeft ?? 0) > 0)
         ? nullInput() : sim.inputFor(slot);
-      this._move(sim, p, frame, time, dt);
+      this._move(sim, p, frame, time, dt, T);
     }
   }
 
-  _move(sim, p, frame, time, dt) {
+  _move(sim, p, frame, time, dt, T) {
     const body = p.body;
     const s = p.state;
     // Carried player's EFFECTIVE mass — a hauled bagged-relic carrier
@@ -70,7 +72,20 @@ export class MovementSystem {
       body.setVelocityX(body.velocity.x + step);
     }
 
+    // ----- auto-climb (zip mode): one tile is free, two tiles need the hook -----
+    // Removing jump makes every lip a wall, so a step-up has to exist. It is
+    // mass-scaled like everything else: stepHeight/mass, which means a relic
+    // carrier at 2.0 clears 20 px — nothing on a 40 px grid. The relic walks
+    // flat ground or it goes on the line. That is the rule doing the work,
+    // not a special case for the objective.
+    if (T.autoStep && onGround && frame.moveX !== 0) {
+      // Carried load counts, riders do not — the same split jump used.
+      this._autoStep(sim, p, Math.sign(frame.moveX),
+        T.stepHeight * massSpeedMult(s.mass + carriedLoad));
+    }
+
     // ----- jump: buffer + coyote + variable height -----
+    if (!T.jumpEnabled) return;
     if (frame.jump) s.jumpBufferedAt = time;
     const buffered = time - s.jumpBufferedAt <= PHYSICS.jumpBufferMs;
     const coyote = time - s.lastGroundedAt <= PHYSICS.coyoteMs;
@@ -88,5 +103,45 @@ export class MovementSystem {
     if (!frame.jumpHeld && body.velocity.y < 0) {
       body.setVelocityY(body.velocity.y * (1 - (1 - PHYSICS.jumpCutMult) * dt * 10));
     }
+  }
+
+  /**
+   * Arcade has no step-up, so this is it: if we are walking into something,
+   * find the surface we are pressed against, and if its top is within reach
+   * AND our body fits standing on it, translate up. Velocity is untouched —
+   * you keep walking, the lip just stops existing.
+   *
+   * Deliberately probes 2 px past the body edge rather than trusting
+   * blocked.left/right alone: those flags are from the previous physics
+   * step, so a fresh contact would cost a frame of being stuck.
+   */
+  _autoStep(sim, p, dir, maxRise) {
+    if (maxRise < 2) return; // too heavy to climb anything (relic carrier)
+    const b = p.body;
+    if (!(dir < 0 ? b.blocked.left : b.blocked.right)) return;
+    const probeX = dir < 0 ? b.x - 2 : b.right + 2;
+    const feet = b.bottom;
+    const band = feet - maxRise; // highest surface we could stand on
+
+    let topY = null;
+    for (const r of terrainRects(sim)) {
+      if (probeX < r.x || probeX > r.right) continue;
+      if (r.y >= feet - 1 || r.bottom <= band) continue; // below us / out of reach
+      if (topY === null || r.y < topY) topY = r.y;
+    }
+    if (topY === null) return;
+    const rise = feet - topY;
+    if (rise <= 0 || rise > maxRise) return; // a two-tile wall stays a wall
+
+    // Headroom: the body must actually fit up there, or we would shove it
+    // into a ceiling and wedge it.
+    const dest = new Phaser.Geom.Rectangle(b.x, topY - b.height, b.width, b.height);
+    for (const r of terrainRects(sim)) {
+      if (dest.x < r.right && r.x < dest.right &&
+          dest.y < r.bottom - 0.5 && r.y + 0.5 < dest.bottom) return;
+    }
+    p.y -= rise;
+    b.position.y -= rise;   // keep the body in sync inside this same tick
+    b.prev.y -= rise;       // …and its previous position, or blocked flags lie
   }
 }
