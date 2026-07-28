@@ -382,6 +382,77 @@ export const GRAPPLE = {
                         // 'refire' retarget bypasses it)
 };
 
+// ---------- Hook projectile (TRAVERSAL.projectileHook only) ----------
+// The zip stops being a hitscan ray and becomes a THROWN OBJECT: it flies,
+// gravity bends it, and a hook that grabs nothing comes home on its own.
+// The one behaviour this buys that a ray cannot: aim high, the hook arcs
+// over the deck, lands on it, and gets dragged back until it bites the lip.
+// So a lip has two ways in — a direct throw, or a lob plus a short drag —
+// and both are the player's call, not a snap radius doing it for them.
+//
+// Both come out of ONE rule, which is why there is no mode switch anywhere:
+// a mouse throw solves the launch angle that puts the arc THROUGH the cursor
+// (free aim, honoured under gravity). Aim at a lip and the hook arrives at
+// it. Aim somewhere unreachably high and there is no solution, so the hook
+// launches raw along the aim instead — which is exactly the lob that sails
+// over the lip, lands on the deck, and gets dragged back into it.
+export const HOOK = {
+  throwSpeed: 950,      // px/s muzzle speed.
+  gravity: 1600,        // px/s^2 on the hook alone (above the world's 1400 —
+                        // a hook is a dead weight on a string).
+                        // TWO DERIVED NUMBERS DECIDE WHETHER A MAP IS
+                        // PLAYABLE, and they are not the same number:
+                        //   flat reach     v²/g  = 564 px  (≥ maxRange 420, so
+                        //     the ROPE is the horizontal limit, not the throw —
+                        //     one limit for the player to learn)
+                        //   vertical reach v²/2g = 282 px  (HALF of it; this is
+                        //     the real constraint, and it is easy to break)
+                        // A thrown hook can only ever reach half as high as it
+                        // reaches far. The tallest single-hook climb in the
+                        // Zip Arena is anchor B → the perch lip at ~235 px, so
+                        // 282 leaves one tile of headroom; at the earlier
+                        // 820 px/s the reach was 210 and that climb was simply
+                        // impossible, with nothing on screen to explain why.
+                        // Raise speed before lowering gravity if a level needs
+                        // a taller hook.
+                        // The curve also has to stay THIS curvy for the
+                        // lob-and-drag to exist: a flatter hook cannot turn
+                        // around inside 420 px of rope, so it could never come
+                        // DOWN onto a deck above you, which is the whole
+                        // feature. Straight-aim accuracy is not what pays for
+                        // the curve (the arc solver does that), so the curve
+                        // costs nothing.
+                        // (Checked with scratchpad/hook-probe.mjs against
+                        // every station in zipArena.)
+  retractSpeed: 1400,   // px/s coming home. Faster than the throw: a miss costs
+                        // you the flight time, not double it
+  maxFlightMs: 1200,    // a hook that has hit nothing this long gives up
+  slideSpeed: 560,      // px/s the landed hook is dragged along a deck toward
+                        // the player's side. ~0.4 s to cross a 240 px perch —
+                        // long enough to see it happen, short enough to use
+  catchRadius: 28,      // px: how near an anchor the hook must pass to bite.
+                        // HALF of TRAVERSAL.anchorSnap (56) on purpose — that
+                        // number was an aim-hitbox bolted onto a hitscan ray;
+                        // this one is the hook's own size, and it is the second
+                        // half of the direct-aim-range calculation above. A
+                        // throw that clears a lip by more than this misses in
+                        // flight — and then lands and drags into it, which is
+                        // the whole feature, so widening this to paper over a
+                        // miss deletes the mechanic that already covers it
+  bodyPad: 10,          // px the hook's own size adds around a BODY's box.
+                        // Same argument as catchRadius, and the relic needs it
+                        // most: a 22×22 objective flying through the air is
+                        // otherwise nearly impossible to grapple-catch with a
+                        // point-sized hook, and that catch is a shipped tech
+                        // (RELIC.pickupRadius was doing this job for the ray)
+  anchorBias: 6,        // px of tie-break the anchor gets over the slab it sits
+                        // on: hooking a lip must beat landing on the deck 2 px
+                        // behind it
+  dragMaxMs: 900,       // dragging a deck that offers no lip is not a stalemate
+  dragArriveX: 8,       // px horizontal: the hook has been dragged under the
+                        // player without finding a lip → nothing to catch
+};
+
 // ---------- Traversal mode (PROTOTYPE — nothing here is locked) ----------
 // The question being tested: remove jump, navigate by zip, and let the
 // LEVEL decide how fast you cross it by deciding where the anchors are.
@@ -394,17 +465,28 @@ export const GRAPPLE = {
 export const TRAVERSAL = {
   // The shipped mode. These values reproduce today's behaviour exactly.
   jump: {
-    jumpEnabled: true,
+    jumpEnabled: true, jumpVelocityMult: 1,
     autoStep: false, stepHeight: 0,
     twoStage: false,
     anchorsOnly: false, anchorSnap: 0,
+    projectileHook: false,
     zipSpeed: GRAPPLE.zipSpeed, massScaledZip: false,
     launcherInherit: 0,
     tetherMaxMs: 0,
   },
   // The prototype.
   zip: {
-    jumpEnabled: false,   // the whole point
+    jumpEnabled: true,    // REVISED: zip mode has a jump again. Removing it
+                          // entirely made every 40 px lip a negotiation and the
+                          // moment-to-moment feel dead between hooks
+    jumpVelocityMult: 0.7,// …but a LOW one: 560*0.7 = 392 px/s → a 55 px apex.
+                          // That is deliberately calibrated to station A's step
+                          // law: it clears the ONE-tile block (40) and cannot
+                          // reach the TWO-tile one (80), so the level's "one
+                          // tile free, two tiles hook" rule survives intact.
+                          // A relic carrier (jumpMult 1/√2) gets a 27 px apex —
+                          // under one tile, matching its 20 px auto-step: the
+                          // objective still cannot walk or hop uphill
     autoStep: true,
     stepHeight: 40,       // ONE 40 px tile at mass 1.0; actual = stepHeight/mass,
                           // so a relic carrier (2.0) climbs 20 px — nothing on
@@ -421,7 +503,14 @@ export const TRAVERSAL = {
     anchorSnap: 56,       // px of perpendicular slop when aiming at an anchor —
                           // hooking a 1 px corner with a raw ray is not a skill,
                           // it is a chore. Bigger than aimAssistRadius (48) on
-                          // purpose: this is not assist, it is the hitbox
+                          // purpose: this is not assist, it is the hitbox.
+                          // UNUSED while projectileHook is on (HOOK.catchRadius
+                          // replaces it); kept so the ray mode still works
+    projectileHook: true, // the zip is a thrown object with its own gravity
+                          // (HOOK block). This is what turns anchorSnap's
+                          // forgiveness into a physical one: a high throw is no
+                          // longer a miss, it is a lob that lands on the deck
+                          // and drags into the lip
     zipSpeed: 650,        // nerfed from 900. Hooking terrain is workmanlike;
                           // hooking a braced TEAMMATE is the fast route. That
                           // asymmetry is what makes the team the traversal network

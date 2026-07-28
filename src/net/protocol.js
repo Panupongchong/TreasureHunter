@@ -64,12 +64,17 @@ export const EV = {
   STUN: 'stun',     // {slot, ms, cause}
   REVIVE: 'revive', // {slot, by} — by null = self-recovered
   GRAPPLE_ATTACH: 'grappleAttach',
-    // {slot, targetKind:'terrain'|'door'|'player'|'monster'|'relic',
-    //  targetId: string|null, x, y}  — x,y = anchor/impact point
+    // {slot, targetKind:'terrain'|'door'|'player'|'monster'|'relic'|'reel',
+    //  targetId: string|null, x, y}  — x,y = anchor/impact point.
+    // With a projectile hook this fires when the hook BITES, not when the
+    // button is pressed: the throw itself is silent on the wire (the beam is
+    // snapshot-driven, so the arc renders without an event).
   GRAPPLE_DETACH: 'grappleDetach',
     // {slot, reason:'release'|'arrived'|'blocked'|'range'|'los'|'stun'|
-    //  'targetStun'|'carried'|'targetGone'|'refire'|'manual'|'caught'}
+    //  'targetStun'|'carried'|'targetGone'|'refire'|'manual'|'caught'|
+    //  'letGo'|'tetherExpired'|'hookReturned'}
     // 'caught' (WP5): flying relic auto-caught by its own grappler
+    // 'hookReturned': a thrown hook grabbed nothing and came home
   NOISE_BURST: 'noiseBurst',
     // {x, y, amount, cause} — presentation-only event (WP7 ripple scales
     // off `amount`). WP4: addNoise() in systems/NoiseSystem.js is the ONLY

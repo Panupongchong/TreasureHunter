@@ -90,7 +90,10 @@ export class MovementSystem {
     const buffered = time - s.jumpBufferedAt <= PHYSICS.jumpBufferMs;
     const coyote = time - s.lastGroundedAt <= PHYSICS.coyoteMs;
     if (buffered && (onGround || coyote) && body.velocity.y >= -1) {
-      let vy = -PHYSICS.baseJumpVelocity * jumpMult;
+      // T.jumpVelocityMult is the per-map jump CEILING (zip mode: 0.7 → a
+      // 55 px apex). It multiplies the mass rule, never replaces it, so a
+      // heavy body is still worse off in a low-jump map than a light one.
+      let vy = -PHYSICS.baseJumpVelocity * jumpMult * (T.jumpVelocityMult ?? 1);
       if (carrier) {
         // 80% velocity inheritance from the body under your feet.
         vy += PVP.velocityInheritance * Math.min(0, carrier.body.velocity.y);

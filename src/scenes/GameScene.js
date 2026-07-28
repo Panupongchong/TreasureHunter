@@ -705,6 +705,7 @@ export class GameScene extends Phaser.Scene {
       for (const [slot, g] of this.sim.grapples) {
         lines.push(
           `g${slot}→${g.targetId ?? g.targetKind}` +
+          ` ${g.phase ?? 'reeling'}` + // flying/dragging/retracting = hook in air
           ` len ${Math.hypot(g.tx - g.x, g.ty - g.y).toFixed(0)}` +
           ` a ${(g.dbgAccel ?? 0).toFixed(0)}` + (g.assist ? ' [assist]' : ''));
       }

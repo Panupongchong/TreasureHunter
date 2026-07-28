@@ -3,9 +3,17 @@
 //
 // World 2560×1200, 40 px grid, ground top y=1136. It opts in with
 // `traversal: 'zip'`, which is the ONLY thing separating it from the
-// shipped maps: no jump, auto-climb one tile, terrain attaches at anchor
-// points only, two-stage zip (hook → reel → let go). testMap and
-// shaftMap keep jump and are unaffected — both modes run in one build.
+// shipped maps: a LOW jump (0.7× → 55 px apex, half the normal 112),
+// auto-climb one tile, terrain attaches at anchor points only, two-stage
+// zip (hook → reel → let go), and the hook is a THROWN body with its own
+// gravity. testMap and shaftMap keep the full jump and the hitscan zip and
+// are unaffected — both modes run in one build.
+//
+// The low jump and the step law are the same statement said twice: 55 px
+// clears station A's one-tile block and cannot touch the two-tile one, so
+// every distance below still means what the station comments say it means.
+// What the jump adds is the small stuff between hooks — hopping the lip you
+// are standing next to instead of negotiating with it.
 //
 // Read west to east; every station answers one question, and THE ROAD
 // (platform 3) runs unbroken underneath so you can always walk back.
